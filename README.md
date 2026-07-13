@@ -1,6 +1,6 @@
 # Semantic Resume-to-Job Alignment Matrix
 
-> A Transformer-based semantic resume screening system that matches resumes with job descriptions using dense vector embeddings, FAISS semantic search, and explainable ATS scoring.
+> A Transformer-based semantic resume screening system that matches resumes with job descriptions using dense vector embeddings, FAISS semantic search, and explainable ATS scoring — now with an interactive Streamlit app.
 
 ---
 
@@ -35,6 +35,8 @@ Instead of searching for exact keywords, the system compares the semantic meanin
 - Resume-to-Job Alignment Matrix
 - Explainable ATS Scoring
 - High-dimensional Semantic Vector Representation
+- Interactive Streamlit Web Application
+- PDF, DOCX, and TXT Resume/JD Upload
 - Open-source pipeline (No OpenAI API required)
 
 ---
@@ -42,7 +44,7 @@ Instead of searching for exact keywords, the system compares the semantic meanin
 ## Project Workflow
 
 ```
-Resume Dataset
+Resume / Job Description
         │
         ▼
 Text Cleaning
@@ -67,6 +69,9 @@ Semantic Alignment Matrix
         │
         ▼
 ATS Score Calculation
+        │
+        ▼
+Streamlit UI (Upload → Results)
 ```
 
 ---
@@ -127,6 +132,15 @@ https://www.kaggle.com/datasets/kshitizregmi/jobs-and-job-description
 ### Visualization
 
 - Matplotlib
+
+### Web Application
+
+- Streamlit
+
+### File Parsing
+
+- pypdf (PDF resumes/JDs)
+- python-docx (DOCX resumes/JDs)
 
 ---
 
@@ -221,6 +235,47 @@ Similarity scores are aggregated into an overall ATS compatibility score.
 
 ---
 
+## Streamlit Application
+
+An interactive Streamlit app is included so a user can upload their own resume and job description and get a live semantic alignment report, without touching the notebook.
+
+### App Capabilities
+
+- Upload resume and job description as **PDF, DOCX, or TXT** (or paste text directly)
+- Adjustable chunking parameters (chunk size, overlap, Top-K matches) from the sidebar
+- Live text cleaning, chunking, and MPNet embedding generation
+- FAISS-based semantic search between resume chunks and JD chunks
+- ATS Score, Grade, Mean Similarity, and Coverage displayed as summary metrics
+- Explainable Report tab showing best JD match per resume chunk
+- Strong Matches tab (similarity ≥ 0.80)
+- Weak Matches tab (similarity < 0.60)
+- Full Alignment Matrix view (all Top-K matches, not just the best one)
+
+### Project Structure
+
+```
+resume_ats_app/
+├── app.py
+├── requirements.txt
+└── utils/
+    ├── __init__.py
+    ├── text_utils.py         # cleaning, title normalization, chunking
+    ├── embedding_utils.py    # MPNet model loading + embedding generation
+    ├── scoring_utils.py      # FAISS index, alignment matrix, ATS scoring
+    └── file_utils.py         # PDF / DOCX / TXT text extraction
+```
+
+### Running the App
+
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+The app will open in your browser. Upload or paste a resume and a job description, adjust chunking parameters if needed, and click **Run Semantic Alignment**.
+
+---
+
 ## Current Project Status
 
 ### Completed
@@ -234,27 +289,26 @@ Similarity scores are aggregated into an overall ATS compatibility score.
 - Resume-to-Job Alignment Matrix
 - ATS Score computation
 - Explainable semantic matching
+- Streamlit Web Application
+- PDF Resume/JD Upload
+- DOCX Resume/JD Upload
 
 ### In Progress
 
-- Streamlit Web Application
-- PDF Resume Upload
-- DOCX Resume Upload
 - Resume Recommendation Engine
 - Missing Skills Detection
 - Resume Improvement Suggestions
+- Boilerplate/Non-substantive Chunk Filtering (contact info, declarations, etc.)
 
 ---
 
 ## Future Improvements
 
-- Interactive Streamlit dashboard
-- PDF/DOCX resume parsing
-- Resume upload support
-- Job description upload support
 - Skill gap analysis
 - Resume optimization suggestions
-- Downloadable ATS report
+- Downloadable ATS report (PDF export)
+- Weighted chunk scoring (de-emphasize headers/boilerplate in ATS Score)
+- Batch mode (multiple resumes against one JD)
 
 ---
 
@@ -272,7 +326,11 @@ Install dependencies
 pip install -r requirements.txt
 ```
 
-Run the notebook.
+Run the notebook, or launch the Streamlit app with:
+
+```bash
+streamlit run app.py
+```
 
 ---
 
