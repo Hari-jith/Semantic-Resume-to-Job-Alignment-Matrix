@@ -31,11 +31,19 @@ def retrieve_top_matches(faiss_index, resume_embedding, top_k=5):
     return scores[0], indices[0]
 
 
-def build_alignment_matrix(resume_chunks, resume_embeddings, jd_chunks, faiss_index, top_k=5):
+def build_alignment_matrix(resume_chunks, resume_embeddings, jd_chunks, faiss_index,
+                            top_k=5, boilerplate_flags=None):
     """
     resume_chunks : list of resume chunk text strings
     jd_chunks     : list of jd chunk text strings (order must match faiss_index)
+    boilerplate_flags : optional list[bool], same length/order as resume_chunks.
+                         True marks a chunk as non-substantive (header/contact/
+                         declaration text). If omitted, all chunks are treated
+                         as substantive (is_boilerplate=False).
     """
+
+    if boilerplate_flags is None:
+        boilerplate_flags = [False] * len(resume_chunks)
 
     alignment_records = []
 
@@ -53,7 +61,8 @@ def build_alignment_matrix(resume_chunks, resume_embeddings, jd_chunks, faiss_in
                 "jd_chunk_id": int(jd_idx),
                 "jd_chunk": jd_chunks[jd_idx],
                 "similarity": float(score),
-                "rank": rank
+                "rank": rank,
+                "is_boilerplate": boilerplate_flags[chunk_id]
             })
 
     alignment_df = pd.DataFrame(alignment_records)

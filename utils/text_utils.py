@@ -90,6 +90,61 @@ def create_chunks(text, chunk_size=5, overlap=2):
     return chunks
 
 
+BOILERPLATE_PHRASES = [
+    "hereby declare",
+    "hereby confirm",
+    "i declare",
+    "declaration",
+    "references available upon request",
+    "curriculum vitae",
+    "date place signature",
+    "certify that",
+    "to the best of my knowledge",
+]
+
+CONTACT_KEYWORDS = [
+    "email phone",
+    "phone email",
+    "linkedin",
+    "github.com",
+    "portfolio",
+]
+
+
+def is_boilerplate_chunk(text, min_words=25):
+    """
+    Flags chunks that carry no real skill/experience signal:
+    contact/header blocks and legal declaration boilerplate.
+
+    A chunk is flagged if:
+    - it contains a known declaration phrase, OR
+    - it is short (<= min_words) AND contains either a long digit run
+      (phone number) or a contact-related keyword (email/linkedin/etc.)
+
+    Note: clean_text() already strips actual email addresses and URLs,
+    so detection relies on the words/digits left behind (e.g. "email",
+    "phone", a 7+ digit phone number, "linkedin").
+    """
+
+    if not text or not text.strip():
+        return True
+
+    lowered = text.lower()
+    word_count = len(text.split())
+
+    for phrase in BOILERPLATE_PHRASES:
+        if phrase in lowered:
+            return True
+
+    has_long_digit_run = re.search(r"\d{7,}", lowered) is not None
+    has_contact_keyword = any(kw in lowered for kw in CONTACT_KEYWORDS)
+
+    if word_count <= min_words and (has_long_digit_run or has_contact_keyword):
+        return True
+
+    return False
+
+
 def create_chunk_objects(chunk_list):
     """
     Converts a list of text chunks into a list of dictionaries.
