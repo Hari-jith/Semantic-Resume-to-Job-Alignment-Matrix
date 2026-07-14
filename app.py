@@ -5,6 +5,7 @@ import pandas as pd
 from utils.text_utils import (
     clean_text,
     create_chunks,
+    is_boilerplate_chunk,
 )
 from utils.embedding_utils import load_model, generate_embeddings
 from utils.file_utils import extract_text_from_file
@@ -84,6 +85,17 @@ if run_button:
 
     st.success(f"Resume split into {len(resume_chunks)} chunks. JD split into {len(jd_chunks)} chunks.")
 
+    # --- Flag non-substantive chunks (contact/header blocks, declarations) ---
+    boilerplate_flags = [is_boilerplate_chunk(chunk) for chunk in resume_chunks]
+    excluded_count = sum(boilerplate_flags)
+
+    if excluded_count:
+        st.info(
+            f"{excluded_count} resume chunk(s) look like header/contact info or "
+            f"declaration boilerplate and will be excluded from the ATS score "
+            f"(still shown below, tagged)."
+        )
+
     # --- Load model ---
     tokenizer, model, device = load_model()
 
@@ -97,11 +109,23 @@ if run_button:
         faiss_index = build_faiss_index(jd_embeddings)
 
         alignment_df = build_alignment_matrix(
-            resume_chunks, resume_embeddings, jd_chunks, faiss_index, top_k=top_k
+            resume_chunks, resume_embeddings, jd_chunks, faiss_index,
+            top_k=top_k, boilerplate_flags=boilerplate_flags
         )
         best_alignment = compute_best_alignment(alignment_df)
-        ats_metrics = compute_ats_metrics(best_alignment)
-        strong_matches, weak_matches = get_strong_weak_matches(best_alignment)
+
+        # Score only on substantive chunks; fall back to all chunks if
+        # everything got flagged (e.g. a very short resume).
+        substantive_alignment = best_alignment[~best_alignment["is_boilerplate"]]
+        if substantive_alignment.empty:
+            st.warning(
+                "All resume chunks were flagged as boilerplate — scoring on the "
+                "full set instead. Check that the resume text extracted correctly."
+            )
+            substantive_alignment = best_alignment
+
+        ats_metrics = compute_ats_metrics(substantive_alignment)
+        strong_matches, weak_matches = get_strong_weak_matches(substantive_alignment)
 
     # ------------------------------------------------------------
     # Results
@@ -125,9 +149,13 @@ if run_button:
 
     with tab1:
         st.subheader("Best JD Match per Resume Chunk")
-        report = best_alignment.sort_values("similarity", ascending=False)
+        st.caption("Rows marked \"boilerplate\" were excluded from the ATS score above.")
+        report = best_alignment.sort_values("similarity", ascending=False).copy()
+        report["status"] = report["is_boilerplate"].map(
+            {True: "boilerplate (excluded)", False: "scored"}
+        )
         st.dataframe(
-            report[["resume_chunk", "jd_chunk", "similarity"]],
+            report[["resume_chunk", "jd_chunk", "similarity", "status"]],
             use_container_width=True,
             height=500
         )
@@ -148,6 +176,9 @@ if run_button:
 
     with st.expander("Full Alignment Matrix (all top-K matches)"):
         st.dataframe(
-            alignment_df[["resume_chunk_id", "resume_chunk", "jd_chunk_id", "jd_chunk", "similarity", "rank"]],
+            alignment_df[[
+                "resume_chunk_id", "resume_chunk", "jd_chunk_id", "jd_chunk",
+                "similarity", "rank", "is_boilerplate"
+            ]],
             use_container_width=True
         )
