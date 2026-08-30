@@ -170,7 +170,6 @@ The same three systems against real labeled fit data.
 
 ![Gold-standard evaluation comparison chart](assets/gold_standard_comparison.png)
 
-> Image paths above are placeholders (`assets/...`) -- update them to match wherever you upload the corresponding PNGs in this repo. See [Uploading Result Images](#uploading-result-images).
 
 ## ATS Scoring & Explainability Demo
 
