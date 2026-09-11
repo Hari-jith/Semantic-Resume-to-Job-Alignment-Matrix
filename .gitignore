@@ -1,14 +1,18 @@
+# Environment / secrets
+.env
+
 # Python
 __pycache__/
 *.pyc
-
-# Jupyter
-.ipynb_checkpoints/
-
-# Virtual Environment
+.venv/
 venv/
-.env
 
-# OS Files
+# Fine-tuned model weights (large binary files — not committed to git)
+backend/models/resume_job_mpnet_finetuned/
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+
+# OS
 .DS_Store
-Thumbs.db
