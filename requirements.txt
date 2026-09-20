@@ -10,7 +10,8 @@ python-dotenv==1.0.1
 
 # --- ML / embeddings ---
 sentence-transformers==3.2.1
-torch==2.4.1                       # CPU is fine for inference at this scale
+torch>=2.6.0                       # CPU is fine for inference at this scale;
+                                    # exact version depends on your Python version — pip will pick a compatible one
 
 # --- File parsing ---
 pdfplumber==0.11.4                 # PDF text extraction
