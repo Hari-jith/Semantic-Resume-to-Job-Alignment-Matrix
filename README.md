@@ -1,277 +1,206 @@
-# Semantic Resume-Job Alignment & ATS Intelligence Pipeline
+# Semantic Resume ATS
 
-> An end-to-end pipeline that fine-tunes a Sentence Transformer to semantically match resumes to job postings, evaluated against both heuristic and REAL labeled ground truth, then layered with FAISS retrieval, rule-based ATS scoring, explainability, and a demo application.
+AI-powered resume analysis and job matching. Upload a resume for a general
+ATS-style review, or add a job description to get a match score, skill-gap
+analysis, and tailored improvement suggestions.
 
-**Status: 🚧 Incomplete / Work in Progress** — every module below runs end-to-end on real data, with a real 3-epoch training run completed. Most retrieval-quality problems from earlier iterations are fixed, but a real, honestly-documented regression showed up in this run too. See [Known Issues & Honest Limitations](#known-issues--honest-limitations).
+## What it does
 
----
+**Resume only:**
+- Extracts and analyzes resume text (PDF/DOCX)
+- Detects skills against a curated taxonomy (110+ skills, 12 categories)
+- Produces a transparent, weighted ATS score (completeness, skill breadth,
+  structure quality, role-alignment signal)
+- Recommends the top matching job roles, ranked by a combination of semantic
+  embedding similarity and skill overlap, each with a grounded explanation
 
-## Table of Contents
-- [Overview](#overview)
-- [Why This Project](#why-this-project)
-- [Architecture](#architecture)
-- [Dataset](#dataset)
-- [Pipeline: All 18 Modules](#pipeline-all-18-modules)
-- [Results](#results)
-- [Visualizations](#visualizations)
-- [ATS Scoring & Explainability Demo](#ats-scoring--explainability-demo)
-- [Known Issues & Honest Limitations](#known-issues--honest-limitations)
-- [Project Status & Roadmap](#project-status--roadmap)
-- [Repo Structure](#repo-structure)
-- [Getting Started](#getting-started)
-- [Uploading Result Images](#uploading-result-images)
-- [Tech Stack](#tech-stack)
-- [Acknowledgments](#acknowledgments)
-- [License](#license)
+**Resume + job description:**
+- Computes an ATS match score specific to that resume/JD pair (semantic
+  similarity, skill match, keyword relevance, experience alignment, resume
+  completeness)
+- Shows matching and missing skills
+- Generates tiered improvement suggestions (Critical / Recommended / Optional),
+  grounded in the actual detected gaps — never suggests claiming skills or
+  experience the candidate doesn't have
 
----
+## Why it was built
 
-## Overview
-
-This project fine-tunes `sentence-transformers/all-mpnet-base-v2` to place resumes, job descriptions, job titles, and skill profiles in a shared embedding space, then builds a small ATS-style system on top of it:
-
-1. **Retrieval** — a fine-tuned bi-encoder + FAISS index that ranks resumes against jobs by semantic similarity.
-2. **ATS scoring** — a composite, interpretable 0-100 score combining semantic similarity, skill coverage, experience match, and role match.
-3. **Explainability** — plain-language, rule-based explanations plus a leave-one-out skill-importance analysis (no LLM involved).
-4. **Application layer** — a callable end-to-end pipeline and an interactive notebook demo.
-
-Unlike earlier iterations, this version is evaluated against **real, human/algorithmically labeled ground truth** (`cnamuangtoun/resume-job-description-fit`, 8,000 resume&harr;job pairs), not just a role-matching proxy this notebook constructs itself. On that gold-standard test, and on the notebook's own strict retrieval test, **fine-tuning clearly and measurably outperforms both a TF-IDF baseline and the untrained base model** — see [Results](#results).
-
-## Why This Project
-
-Most public "resume matcher" repos use keyword overlap or TF-IDF. This project instead builds and *evaluates* a real semantic retrieval system end-to-end — data cleaning, contrastive pair construction, hard-negative mining, fine-tuning, multiple independent evaluation protocols (including one against real labels), a production retrieval interface, ATS-style scoring, and explainability.
+Most ATS tools are simple keyword matchers. This project explores a more
+semantic approach — fine-tuning a sentence embedding model specifically for
+resume-job matching — while keeping the system honest about what that
+approach can and can't do, and keeping a fast, free LLM (Groq) in a
+supporting role for language tasks rather than as the source of truth for
+scoring.
 
 ## Architecture
 
-```mermaid
-graph TD
-    A[1. Data Loading] --> B[2. Cleaning]
-    B --> C[3. Role Processing]
-    C --> D[4. MPNet Setup]
-    D --> E[5. Text Preparation]
-    E --> F[6. Training Pair Generation + Hard Negatives]
-    F --> G[7. Retrieval Evaluator + TF-IDF Baseline + Gold-Standard Evaluator]
-    G --> H[8. MPNet Fine-Tuning, resumable across sessions]
-    H --> I[9. Fine-Tuned Evaluation, incl. gold-standard]
-    I --> J[10. Role-Based Evaluation]
-    J --> K[11. Embedding Visualization]
-    K --> L[12. Production Retrieval]
-    L --> M[13. FAISS Retrieval]
-    M --> N[14. ATS / Match Scoring]
-    N --> O[15. Explainability]
-    O --> P[16. Application]
-    P --> Q[17. Final Model Comparison]
-    Q --> R[18. Documentation / Deployment]
-```
+\```
+Resume/JD (PDF or DOCX or text)
+        │
+        ▼
+  Text extraction (pdfplumber / python-docx)
+        │
+        ▼
+  Skill extraction (spaCy PhraseMatcher + curated taxonomy)
+        │
+        ▼
+  Sentence embedding (fine-tuned MPNet, falls back to pretrained if unavailable)
+        │
+        ▼
+  Transparent weighted ATS scoring  ◄────  Groq (structured JSON: summaries,
+        │                                   JD analysis, tiered improvements)
+        ▼
+  FastAPI JSON response  ──────────────►  React frontend
+\```
 
-## Dataset
+**Backend:** Python, FastAPI, Sentence Transformers, spaCy, pdfplumber,
+python-docx, Groq API.
+**Frontend:** React (Vite), Tailwind CSS v4.
+**No database** — the app is stateless; the frontend holds resume/JD text
+in memory between the initial analysis and follow-up calls (recommended
+jobs / improvements).
 
-| Source | Size | Notes |
+## Machine learning approach
+
+**Base model:** `sentence-transformers/all-mpnet-base-v2` (768-dim embeddings).
+
+**Fine-tuning:** `MultipleNegativesRankingLoss`, trained on
+[`cnamuangtoun/resume-job-description-fit`](https://huggingface.co/datasets/cnamuangtoun/resume-job-description-fit) —
+a public dataset of 8,000 real resume/job-description pairs labeled `Good Fit`
+/ `Potential Fit` / `No Fit` (6,240 train / 1,760 test, official split).
+
+Training pairs are built from `Good Fit` labels as positives. Where the same
+resume also has a `No Fit` job description in the training data, that pair
+becomes an explicit **hard negative** (a real anchor/positive/negative
+triplet); otherwise the pair trains with in-batch negatives only.
+`Potential Fit` rows are excluded from both training and evaluation as
+genuinely ambiguous. Full training/evaluation code:
+[`notebooks/finetune_resume_job_mpnet.ipynb`](notebooks/finetune_resume_job_mpnet.ipynb).
+
+### Results (4 epochs, held-out test set, 233 evaluation queries)
+
+Retrieval — ranking the correct job description against all unique test JDs:
+
+| Method | Precision@1 | Precision@5 | Recall@5 | MRR | nDCG@5 |
+|---|---|---|---|---|---|
+| **Fine-tuned MPNet** | **0.258** | **0.130** | **0.411** | **0.415** | **0.331** |
+| Pretrained MPNet | 0.060 | 0.058 | 0.193 | 0.181 | 0.128 |
+| TF-IDF | 0.099 | 0.067 | 0.202 | 0.216 | 0.148 |
+
+Classification — distinguishing `Good Fit` from `No Fit` pairs:
+
+| Method | AUC-ROC | F1 (at selected threshold) |
 |---|---|---|
-| Resume corpus | 29,780 resumes | Public Kaggle resume text corpus |
-| Job descriptions | 123,849 raw &rarr; 18,658 after tech-role filtering &rarr; **17,247 after deduplication** | [`arshkon/linkedin-job-postings`](https://www.kaggle.com/datasets/arshkon/linkedin-job-postings) (real, individually scraped 2023-2024 LinkedIn postings) |
-| Gold-standard fit labels | 6,241 train / 1,759 test | [`cnamuangtoun/resume-job-description-fit`](https://huggingface.co/datasets/cnamuangtoun/resume-job-description-fit) -- real Good Fit / Potential Fit / No Fit labels, used as the primary evaluation |
-| ESCO skill taxonomy | 155 occupations | Built-in fallback dictionary -- live ESCO datasets on the Hugging Face Hub were attempted first and were not reachable |
+| **Fine-tuned MPNet** | **0.703** | 0.357 |
+| Pretrained MPNet | 0.508 | 0.366 |
+| TF-IDF | 0.589 | 0.442 |
 
-**1,411 duplicate job postings (7.6% of the tech-filtered set) were removed** before any pairing or evaluation happened -- this directly fixes a bug from an earlier iteration where the same job posting appeared many times in a single top-10 result.
+**What this means:** fine-tuning produced a clear, consistent improvement on
+every retrieval metric (roughly 2-4x over the pretrained baseline) and on
+AUC-ROC — pretrained MPNet's 0.508 is barely above chance at separating fits
+from non-fits, while the fine-tuned model reaches 0.703, a real if moderate
+level of separation. This is why the app's role-matching and semantic-similarity
+scoring rely on the fine-tuned model rather than the pretrained one whenever
+it's present.
 
-## Pipeline: All 18 Modules
+**A real limitation, not hidden:** F1-at-threshold does *not* show the same
+win — fine-tuned (0.357) actually trails TF-IDF (0.442). AUC measures ranking
+quality across all thresholds; F1 depends on one threshold, which here was
+selected from a small validation slice and likely doesn't generalize well.
+This is a genuine weak point of a single fixed decision boundary — which is
+part of why the app never uses one: `ats_service.py` treats semantic
+similarity as one continuous, weighted score component, and `role_matcher.py`
+does ranking rather than binary classification, so the metrics that transfer
+most directly to how this model is actually used (retrieval, AUC) are exactly
+the ones where fine-tuning won clearly.
 
-| # | Module | What it does | Key output |
-|---|---|---|---|
-| 1 | Data Loading | Loads resumes, LinkedIn jobs, ESCO knowledge base, gold-standard fit dataset | 29,780 resumes, 123,849 jobs, 155 ESCO occupations, 8,000 labeled pairs |
-| 2 | Cleaning | Text cleaning, LinkedIn-schema column mapping, experience-level mapping, deduplication | 17,247 clean jobs; 329-skill vocabulary |
-| 3 | Role Processing | Normalizes free-text roles onto the ESCO vocabulary; assigns each resume a `predicted_role` | 98.9% of resumes got a resolved role |
-| 4 | MPNet Setup | Loads the pretrained `all-mpnet-base-v2` base model, applies `MAX_SEQ_LENGTH=256` | 768-dimensional embedding space |
-| 5 | Text Preparation | Document-level train/validation split | 23,824 train / 5,956 validation resumes |
-| 6 | Training Pair Generation | Builds positive pairs, rebalanced toward resume&harr;JD pairs, mines hard negatives | **79,415 training pairs, 64% resume&harr;JD**; 15,000 hard negatives mined |
-| 7 | Retrieval Evaluator | Duplicate-aware evaluator + TF-IDF baseline + gold-standard evaluator | 3,900 validation queries; gold-standard label distribution logged |
-| 8 | MPNet Fine-Tuning | Resumable, one epoch per session, checkpoints on Google Drive, mixed precision | **All 3 configured epochs completed**, resumed correctly across sessions |
-| 9 | Fine-Tuned Evaluation | Compares pretrained vs. TF-IDF vs. fine-tuned, on both the strict proxy AND gold-standard sets | See [Results](#results) -- fine-tuning wins on both |
-| 10 | Role-Based Evaluation | A looser evaluation: does the top result share the resume's role? | Recall@1 = 0.194 (see [Known Issues](#known-issues--honest-limitations)) |
-| 11 | Embedding Visualization | Similarity heatmap + PCA projection | See [Visualizations](#visualizations) |
-| 12 | Production Retrieval | `ResumeJobMatcher` -- cached, brute-force top-K retrieval interface | ~33ms/query on 3,450 jobs |
-| 13 | FAISS Retrieval | `FaissResumeJobMatcher` -- same interface, FAISS-backed | ~23ms/query, 10/10 overlap with brute-force |
-| 14 | ATS / Match Scoring | Composite 0-100 score: 50% semantic + 30% skills + 10% experience + 10% role | See [ATS Demo](#ats-scoring--explainability-demo) |
-| 15 | Explainability | Rule-based match explanation + leave-one-out skill importance | No LLM used |
-| 16 | Application | `run_ats_pipeline()` end-to-end callable + `ipywidgets` demo UI | Working demo |
-| 17 | Final Model Comparison | Aggregates every metric into one table + chart per evaluation type | See [Results](#results) |
-| 18 | Documentation / Deployment | Generates a model card, run manifest, and a reference (unexecuted) FastAPI skeleton | Not a live deployment |
+This is an experimental semantic matching component with demonstrated,
+moderate improvement over baselines — not a production-grade or
+commercial-ATS-equivalent scoring system, and the app's UI and score
+explanations say so directly.
 
-## Results
+## Setup
 
-### The headline result: fine-tuning clearly works, on two independent tests
+### Backend
+\```bash
+cd backend
+python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
+pip install -r ../requirements.txt
+python -m spacy download en_core_web_sm 2>/dev/null || true  # optional; app works without it
+cp ../.env.example .env   # add your GROQ_API_KEY (free tier at console.groq.com)
+uvicorn app.main:app --reload
+\```
+On first run, if no fine-tuned model is present at
+`backend/models/resume_job_mpnet_finetuned/`, the app automatically downloads
+and uses the pretrained `all-mpnet-base-v2` instead — everything still works,
+just with the pretrained-baseline numbers shown above rather than the
+fine-tuned ones. To use the fine-tuned model, run the notebook (see
+`notebooks/README.md`) and place its output at that path.
 
-**Strict retrieval evaluation** (does the model rank a resume's one true matching job description first?):
+### Frontend
+\```bash
+cd frontend
+npm install
+cp .env.example .env   # VITE_API_URL, defaults to http://localhost:8000
+npm run dev
+npm test                # run the interaction test suite
+\```
 
-| Metric | TF-IDF baseline | Pretrained MPNet | Fine-Tuned MPNet |
-|---|---|---|---|
-| Precision@1 | 0.052 | 0.086 | **0.141** |
-| Recall@5 | 0.056 | 0.089 | **0.150** |
-| MRR | 0.058 | 0.092 | **0.152** |
-| nDCG@5 | 0.054 | 0.087 | **0.145** |
+## API endpoints
 
-Fine-tuning roughly **doubles** every metric over the pretrained model, and beats TF-IDF by an even wider margin -- a clean, unambiguous win, unlike an earlier iteration of this project where the fine-tuned model barely matched a keyword-overlap baseline.
-
-**Gold-standard evaluation** (real human/algorithmic fit labels, held-out test set):
-
-| Metric | TF-IDF baseline | Pretrained MPNet | Fine-Tuned MPNet |
-|---|---|---|---|
-| AUC-ROC | 0.547 | 0.598 | **0.607** |
-| Accuracy | 0.513 | **0.544** | 0.524 |
-| F1 | 0.678 | 0.676 | **0.679** |
-| Precision | 0.513 | **0.532** | 0.519 |
-| Recall | **1.000** | 0.927 | 0.982 |
-
-Fine-tuning wins on AUC-ROC (the threshold-independent, most meaningful metric here) and F1, but **accuracy and precision actually dipped slightly versus the pretrained model.** This is a real, honestly-reported nuance -- see [Known Issues](#known-issues--honest-limitations).
-
-### Role-based evaluation: a real regression, with a likely explanation
-
-| Role-based evaluation (Module 10) | This run | Previous run (older dataset) |
-|---|---|---|
-| Recall@1 | **0.194** | 0.564 |
-| Recall@5 | 0.401 | 0.571 |
-| MRR | 0.291 | 0.571 |
-
-This number dropped substantially. It is **not** dismissed here -- see [Known Issues](#known-issues--honest-limitations) for the likely cause and why it doesn't necessarily mean retrieval quality got worse.
-
-### Retrieval latency (3,450-document validation job corpus)
-
-| System | Mean | P95 |
-|---|---|---|
-| Brute-force (NumPy) | 32.52 ms/query | 55.43 ms/query |
-| FAISS (`IndexFlatIP`) | 23.21 ms/query | 29.33 ms/query |
-
-FAISS and brute-force retrieval agreed on **10/10** top results (previously only 2/10, before job deduplication was fixed).
-
-## Visualizations
-
-### Resume &harr; Job Similarity Heatmap
-
-A sampled block of resumes vs. jobs, with role-matching cells outlined in red.
-
-![Resume-job similarity heatmap](assets/similarity_heatmap.png)
-
-### PCA Projection of the Embedding Space
-
-Job postings (triangles) for the most frequent roles, colored, against a faded background of everything else.
-
-![PCA projection of resume and job embeddings](assets/pca_projection.png)
-
-### Strict Retrieval System Comparison
-
-TF-IDF, pretrained MPNet, and fine-tuned MPNet on the strict evaluation -- a clean staircase, fine-tuning winning on every metric.
-
-![Strict retrieval system comparison chart](assets/system_comparison.png)
-
-### Gold-Standard Evaluation Comparison
-
-The same three systems against real labeled fit data.
-
-![Gold-standard evaluation comparison chart](assets/gold_standard_comparison.png)
-
-
-## ATS Scoring & Explainability Demo
-
-A real example from this run's validation output. A `PL/SQL Developer`-adjacent resume was retrieved and scored:
-
-**Module 14 (ATS Scoring)** -- top-ranked candidate:
-
-| Rank | Job | ATS Score | Semantic | Skills | Experience | Role Match |
-|---|---|---|---|---|---|---|
-| 1 | PL/SQL Developer | **52.9** | 0.408 | 0.75 | 1.00 | ❌ |
-
-**Module 15 (Explainability)** -- generated explanation for this match:
-> Overall ATS match score: 52.9/100. Matched skills (6): agile, communication, oracle, performance tuning, scrum, sql. Skills the job asks for but the resume doesn't list (2): functions, pl/sql. Experience meets the posting's requirement. Role: the resume's predicted role doesn't exactly match this job's normalized role, though the underlying content may still be relevant.
-
-**Leave-one-out skill importance** for this match:
-
-| Skill | Similarity drop if removed |
+| Endpoint | Purpose |
 |---|---|
-| scrum | +0.0173 |
-| sql | +0.0146 |
-| business process | +0.0096 |
-| reporting | +0.0077 |
-| agile | +0.0020 |
+| `GET /health` | Service status + which embedding model is active |
+| `POST /analyze/resume` | Resume-only analysis (upload a PDF/DOCX) |
+| `POST /recommend/jobs` | Ranked role recommendations from resume text |
+| `POST /analyze/match` | Resume + JD match score (JD as text or file) |
+| `POST /recommend/improvements` | Tiered, JD-specific improvement suggestions |
 
-Worth noting honestly: the top-ranked candidate did **not** share the resume's predicted role, which ties directly into the role-based evaluation issue below.
+Full request/response schemas are visible at `/docs` when the backend is running.
 
-## Known Issues & Honest Limitations
+## Project structure
 
-This project is shared in its current, imperfect state on purpose.
+\```
+SemanticResumeATS/
+├── backend/
+│   ├── models/resume_job_mpnet_finetuned/   # fine-tuned model goes here (gitignored)
+│   └── app/
+│       ├── main.py, config.py
+│       ├── api/routes/                       # health, resume, matching
+│       ├── parsers/                          # PDF/DOCX extraction, validation
+│       ├── ml/                               # embeddings, similarity, skills, role matching
+│       ├── data/                             # skills taxonomy, role profiles
+│       ├── services/                         # ATS scoring, Groq integration, orchestration
+│       └── schemas/                          # Pydantic request/response models
+├── frontend/
+│   └── src/
+│       ├── api/client.js
+│       └── components/{layout,upload,results}/
+├── notebooks/
+│   └── finetune_resume_job_mpnet.ipynb
+└── requirements.txt, .env.example
+\```
 
-1. **Role-based Recall@1 dropped from 0.564 (previous dataset) to 0.194 (this run) -- likely a metric artifact from switching to messier, real-world job titles, not necessarily a retrieval-quality regression.** The role-based evaluator requires an *exact string match* between a resume's predicted role and a job's normalized role. LinkedIn's real job titles are far more granular than the previous dataset's ("DevOps Engineer" vs. "Sr. DevOps Engineer" vs. "Lead DevOps Engineer" all normalize to different strings). The similarity heatmap actually shows this directly: a DevOps Engineer resume's single highest-similarity match in its entire sampled row is a "Sr. DevOps Engineer" posting -- a clearly excellent match -- but it isn't credited by the role-based metric because the strings don't match exactly. This needs a fix (normalizing away seniority prefixes/suffixes before comparing), not just an explanation.
-2. **On the gold-standard evaluation, accuracy and precision dipped slightly versus the pretrained model, even though AUC-ROC and F1 improved.** Recall is very high across all three systems (0.93-1.0), meaning the classification threshold (tuned on the train split) leans toward predicting "Fit" often. AUC-ROC is threshold-independent and the more meaningful number here, but the accuracy dip is real and worth investigating rather than glossing over.
-3. **The environment-setup pip install cell threw a metadata-generation error for one pinned package** during this run (the install proceeded regardless, and nothing downstream failed, but the specific package was not identified due to the quiet install flag). Worth cleaning up so failures aren't silently swallowed.
-4. **Mean cosine similarity dropped after fine-tuning (0.345 vs. 0.592 pretrained).** This is expected, not a bug -- contrastive fine-tuning typically spreads embeddings out and makes similarity scores more discriminative (better *ranking*), which can lower raw similarity magnitudes. All the ranking metrics (Precision@1, MRR, nDCG) improved substantially, which is what actually matters.
-5. **ESCO skill taxonomy uses a 155-occupation fallback dictionary, not the full live taxonomy.**
-6. **Hard negatives were only mined for resume&harr;job pairs**, not for role/skill pairs.
-7. **Explainability (Module 15) is rule-based and embedding-based, not LLM-based.**
-8. **ATS scoring weights (Module 14) are a reasonable starting point, not an industry-validated formula.**
-9. **The gold-standard dataset (8,000 pairs) is much smaller than the training corpus** -- it's a trustworthy *test*, not a training replacement.
+## Limitations
 
-**Bottom line:** the two most important, most trustworthy evaluations in this notebook (strict retrieval, and real-label gold-standard) both show fine-tuning clearly beating baselines -- a genuine improvement over an earlier iteration where that wasn't true. The role-based metric regression is real and reported honestly, with a specific, plausible, and fixable cause identified rather than hidden.
+- Fine-tuned on a moderate-sized public dataset (8,000 rows, 642 unique
+  resumes × 280 unique job descriptions) — real improvement over baselines,
+  but not a large-scale or production-grade result.
+- F1-at-threshold is unstable (see Results above) — the model is stronger at
+  ranking/retrieval than at binary classification with a fixed threshold.
+- Skill extraction is taxonomy-based (110+ skills) — it will miss skills,
+  tools, or niche terminology not in that list.
+- Experience-alignment scoring is a heuristic based on detected year ranges
+  in resume text, not real structured work-history parsing.
+- No database — resume/JD text lives only in the browser session; nothing
+  is persisted between visits.
+- Scanned/image-only PDFs (no embedded text layer) aren't supported — no OCR.
 
-## Project Status & Roadmap
+## Possible future improvements
 
-Implemented, running end-to-end, and evaluated on real data:
-
-- [x] LinkedIn job dataset with real deduplication (Modules 1-2)
-- [x] Gold-standard labeled evaluation, replacing pure heuristic proxies (Modules 1, 7, 9, 17)
-- [x] Rebalanced training pairs (64% resume&harr;JD, up from ~20%) (Module 6)
-- [x] Fully resumable fine-tuning across Colab sessions, all 3 epochs completed (Module 8)
-- [x] Fine-tuning clearly beats TF-IDF and pretrained baselines on two independent evaluations (Module 9)
-- [x] FAISS retrieval with correct (10/10) agreement against brute-force (Module 13)
-- [x] ATS scoring, explainability, and a working demo app (Modules 14-16)
-
-Known fixes needed next:
-
-- [ ] Normalize seniority prefixes/suffixes (Sr., Lead, Jr., II, III) before role-matching comparisons, and re-run Module 10
-- [ ] Investigate the gold-standard accuracy/precision dip -- try alternate thresholding strategies (e.g. optimizing for accuracy or a fixed precision target instead of F1)
-- [ ] Identify and either fix or remove the pip package causing a silent metadata-generation error during setup
-- [ ] Re-run Module 10 after the role-normalization fix and confirm whether the "regression" was purely a metric artifact
-
-Further out:
-
-- [ ] Hard-negative mining for role/skill pair types
-- [ ] Swap the built-in ESCO fallback for the live taxonomy
-- [ ] An LLM/RAG-based explanation layer
-- [ ] A deployed application wrapping the FastAPI skeleton already generated in Module 18
-
-## Repo Structure
-
-```
-.
-├── semantic_resume_alignment.ipynb   # Full 18-module pipeline notebook
-├── assets/
-│   ├── similarity_heatmap.png        # Module 11 output
-│   ├── pca_projection.png            # Module 11 output
-│   ├── system_comparison.png         # Module 17 output (strict eval)
-│   └── gold_standard_comparison.png  # Module 17 output (gold-standard eval)
-├── README.md
-└── requirements.txt
-```
-
-## Getting Started
-
-Built for **Google Colab** (mounts Google Drive, expects a CUDA GPU runtime -- tested on the free-tier T4).
-
-1. Open `semantic_resume_alignment.ipynb` in Colab.
-2. Download `postings.csv` from [`arshkon/linkedin-job-postings`](https://www.kaggle.com/datasets/arshkon/linkedin-job-postings) on Kaggle and place it at `MyDrive/SemanticResumeATS/datasets/jobs_linkedin/postings.csv`.
-3. Place your resume corpus at the path used in Module 1's loader.
-4. The gold-standard fit dataset downloads automatically from the Hugging Face Hub -- no manual step needed.
-5. Run cells top to bottom. **Module 8 (fine-tuning) trains one epoch per execution** and checkpoints to Google Drive -- if your session disconnects, just re-run that same cell; it resumes automatically instead of starting over.
-
-> **Public datasets aren't bundled in this repo.** Point the notebook at any resume-text corpus and job-description corpus in a compatible schema, or adapt the loader functions.
-
-## Tech Stack
-
-`Python` &middot; `PyTorch` &middot; `sentence-transformers` &middot; `FAISS` &middot; `Hugging Face Hub` &middot; `pandas` / `NumPy` &middot; `scikit-learn` &middot; `Google Colab` &middot; `ipywidgets`
-
-## Acknowledgments
-
-- [`sentence-transformers`](https://www.sbert.net/) for the MNRL training utilities and base model.
-- [FAISS](https://github.com/facebookresearch/faiss) for the approximate nearest-neighbor retrieval index.
-- [ESCO](https://esco.ec.europa.eu/) for the occupation/skills taxonomy concept.
-- [`arshkon/linkedin-job-postings`](https://www.kaggle.com/datasets/arshkon/linkedin-job-postings) and the public Kaggle resume corpus for training data.
-- [`cnamuangtoun/resume-job-description-fit`](https://huggingface.co/datasets/cnamuangtoun/resume-job-description-fit) for gold-standard labeled evaluation data.
+- Mine multiple hard negatives per resume, not just the first available
+- Incorporate `Potential Fit` as a graded/soft label instead of discarding it
+- Combine with additional datasets to increase resume/JD diversity
+- Hyperparameter sweep using the validation evaluator already in the notebook
+- A lightweight cross-encoder re-ranking stage on top of retrieval results
+- Error analysis on the test pairs the model gets most wrong
