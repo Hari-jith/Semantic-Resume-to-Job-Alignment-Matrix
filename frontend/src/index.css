@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+@theme {
+  /* --- Color tokens ---
+     "Document review" concept: paper + ink, with two functional accents —
+     teal for alignment/match, amber for gaps/attention — echoing how a
+     human reviewer marks up a resume with a highlighter. */
+  --color-paper: #EEF1F0;
+  --color-surface: #F8F9F5;
+  --color-ink: #1B2430;
+  --color-ink-muted: #4B5563;
+  --color-line: #C9CDC3;
+  --color-teal: #0F6F6A;
+  --color-teal-soft: #E3EFEC;
+  --color-amber: #B4711F;
+  --color-amber-soft: #F6E9D8;
+  --color-critical: #B3401F;
+  --color-critical-soft: #F5E1DA;
+
+  /* --- Type tokens --- */
+  --font-display: "Source Serif 4", Georgia, serif;
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+/* A single deliberate reveal used when results appear — not scattered
+   per-card animations. */
+@keyframes unfold {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-unfold {
+  animation: unfold 0.5s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-unfold {
+    animation: none;
+  }
+}
+
+/* Visible keyboard focus, kept consistent across the app rather than
+   relying on browser defaults that vary by element. */
+:focus-visible {
+  outline: 2px solid var(--color-teal);
+  outline-offset: 2px;
+}
