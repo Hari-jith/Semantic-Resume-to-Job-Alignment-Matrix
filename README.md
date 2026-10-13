@@ -122,14 +122,14 @@ explanations say so directly.
 ## Setup
 
 ### Backend
-\```bash
+```bash
 cd backend
 python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r ../requirements.txt
 python -m spacy download en_core_web_sm 2>/dev/null || true  # optional; app works without it
 cp ../.env.example .env   # add your GROQ_API_KEY (free tier at console.groq.com)
 uvicorn app.main:app --reload
-\```
+```
 On first run, if no fine-tuned model is present at
 `backend/models/resume_job_mpnet_finetuned/`, the app automatically downloads
 and uses the pretrained `all-mpnet-base-v2` instead — everything still works,
@@ -138,13 +138,13 @@ fine-tuned ones. To use the fine-tuned model, run the notebook (see
 `notebooks/README.md`) and place its output at that path.
 
 ### Frontend
-\```bash
+```bash
 cd frontend
 npm install
 cp .env.example .env   # VITE_API_URL, defaults to http://localhost:8000
 npm run dev
 npm test                # run the interaction test suite
-\```
+```
 
 ## API endpoints
 
@@ -160,7 +160,7 @@ Full request/response schemas are visible at `/docs` when the backend is running
 
 ## Project structure
 
-\```
+```text
 SemanticResumeATS/
 |
 ├── backend/
@@ -180,7 +180,7 @@ SemanticResumeATS/
 ├── notebooks/
 │   └── finetune_resume_job_mpnet.ipynb
 └── requirements.txt, .env.example
-\```
+```
 
 ## Limitations
 
