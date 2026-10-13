@@ -162,6 +162,7 @@ Full request/response schemas are visible at `/docs` when the backend is running
 
 \```
 SemanticResumeATS/
+|
 ├── backend/
 │   ├── models/resume_job_mpnet_finetuned/   # fine-tuned model goes here (gitignored)
 │   └── app/
