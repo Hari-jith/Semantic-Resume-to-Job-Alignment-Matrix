@@ -34,7 +34,7 @@ scoring.
 
 ## Architecture
 
-\```
+```
 Resume/JD (PDF or DOCX or text)
         │
         ▼
@@ -51,7 +51,7 @@ Resume/JD (PDF or DOCX or text)
         │                                   JD analysis, tiered improvements)
         ▼
   FastAPI JSON response  ──────────────►  React frontend
-\```
+```
 
 **Backend:** Python, FastAPI, Sentence Transformers, spaCy, pdfplumber,
 python-docx, Groq API.
